@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { apiFetch } from "../lib/apiFetch";
 import type { OrderHistoryItem } from "../types";
 import BrokerBadge from "./BrokerBadge";
 
@@ -8,7 +9,7 @@ export default function OrderHistory({ broker }: { broker?: string }) {
 
   const fetchOrders = () => {
     setLoading(true);
-    fetch("/api/orders/history")
+    apiFetch("/api/orders/history")
       .then((r) => (r.ok ? r.json() : { orders: [] }))
       .then((d) => setOrders(d.orders || []))
       .catch(() => {})

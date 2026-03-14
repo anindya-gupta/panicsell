@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { apiFetch } from "../lib/apiFetch";
 import type { AlertConfig as AlertConfigType, BrokerStatus } from "../types";
 
 interface Props {
@@ -13,7 +14,7 @@ export default function AlertConfig({ brokers, onClose }: Props) {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    fetch("/api/alerts/config")
+    apiFetch("/api/alerts/config")
       .then((r) => r.json())
       .then(setConfig)
       .catch(() => {});
@@ -21,7 +22,7 @@ export default function AlertConfig({ brokers, onClose }: Props) {
 
   const save = async () => {
     setSaving(true);
-    await fetch("/api/alerts/config", {
+    await apiFetch("/api/alerts/config", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ enabled: config.enabled, email: config.email, thresholds: config.thresholds }),

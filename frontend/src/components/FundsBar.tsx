@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { apiFetch } from "../lib/apiFetch";
 import type { MarginsResponse } from "../types";
 
 function formatINR(n: number): string {
@@ -11,7 +12,7 @@ export default function FundsBar({ broker }: { broker?: string }) {
   const [data, setData] = useState<MarginsResponse | null>(null);
 
   useEffect(() => {
-    fetch("/api/portfolio/margins")
+    apiFetch("/api/portfolio/margins")
       .then((r) => (r.ok ? r.json() : null))
       .then(setData)
       .catch(() => {});

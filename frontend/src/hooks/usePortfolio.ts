@@ -1,4 +1,5 @@
 import { useState, useCallback } from "react";
+import { apiFetch } from "../lib/apiFetch";
 import type { Holding, PortfolioSummary } from "../types";
 
 export function usePortfolio() {
@@ -14,7 +15,7 @@ export function usePortfolio() {
       const url = broker
         ? `/api/portfolio/holdings?broker=${broker}`
         : "/api/portfolio/holdings";
-      const res = await fetch(url);
+      const res = await apiFetch(url);
       if (!res.ok) {
         const data = await res.json().catch(() => null);
         throw new Error(data?.detail || `HTTP ${res.status}`);

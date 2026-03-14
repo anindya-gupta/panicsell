@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { apiFetch } from "../lib/apiFetch";
 import type { BrokerStatus } from "../types";
 
 export function useAuth() {
@@ -7,7 +8,7 @@ export function useAuth() {
 
   const checkStatus = useCallback(async () => {
     try {
-      const res = await fetch("/api/auth/status");
+      const res = await apiFetch("/api/auth/status");
       const data = await res.json();
       setBrokers(data.brokers || []);
     } catch {
@@ -26,7 +27,7 @@ export function useAuth() {
   };
 
   const logout = async (brokerName: string) => {
-    await fetch(`/api/auth/logout/${brokerName}`, { method: "POST" });
+    await apiFetch(`/api/auth/logout/${brokerName}`, { method: "POST" });
     await checkStatus();
   };
 

@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     frontend_url: str = "http://localhost:5173"
     backend_url: str = "http://localhost:8000"
 
+    admin_username: str = "admin"
+    admin_password: str = ""
+
     smtp_email: str = ""
     smtp_app_password: str = ""
 

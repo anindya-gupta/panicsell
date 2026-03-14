@@ -1,12 +1,13 @@
 import { useState, useEffect, useCallback } from "react";
+import { apiFetch } from "../lib/apiFetch";
 import type { MarketStatus } from "../types";
 
 export function useMarketStatus() {
   const [status, setStatus] = useState<MarketStatus | null>(null);
 
-  const fetch_status = useCallback(async () => {
+  const fetchStatus = useCallback(async () => {
     try {
-      const res = await fetch("/api/market/status");
+      const res = await apiFetch("/api/market/status");
       const data: MarketStatus = await res.json();
       setStatus(data);
     } catch {
@@ -15,10 +16,10 @@ export function useMarketStatus() {
   }, []);
 
   useEffect(() => {
-    fetch_status();
-    const interval = setInterval(fetch_status, 30000);
+    fetchStatus();
+    const interval = setInterval(fetchStatus, 30000);
     return () => clearInterval(interval);
-  }, [fetch_status]);
+  }, [fetchStatus]);
 
   return status;
 }

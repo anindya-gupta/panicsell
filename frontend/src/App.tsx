@@ -9,6 +9,8 @@ import ConfirmModal from "./components/ConfirmModal";
 import OrderResults from "./components/OrderResults";
 import OrderHistory from "./components/OrderHistory";
 import AlertConfig from "./components/AlertConfig";
+import LoginPage from "./components/LoginPage";
+import { useAppAuth } from "./hooks/useAppAuth";
 import { useAuth } from "./hooks/useAuth";
 import { usePortfolio } from "./hooks/usePortfolio";
 import { usePanicSell } from "./hooks/usePanicSell";
@@ -32,6 +34,29 @@ function computeSummary(list: Holding[]): PortfolioSummary {
 }
 
 export default function App() {
+  const { isAuthenticated, checking, verify, login: appLogin, logout: appLogout } = useAppAuth();
+
+  useEffect(() => { verify(); }, [verify]);
+
+  if (checking) {
+    return (
+      <div className="min-h-screen flex items-center justify-center noise-bg">
+        <div className="relative">
+          <div className="absolute -inset-4 bg-gradient-to-r from-accent-red to-accent-orange rounded-2xl opacity-20 blur-xl animate-pulse" />
+          <div className="relative font-mono text-lg font-bold text-gray-500 animate-pulse">Loading...</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <LoginPage onLogin={appLogin} />;
+  }
+
+  return <Dashboard onAppLogout={appLogout} />;
+}
+
+function Dashboard({ onAppLogout }: { onAppLogout: () => void }) {
   const { brokers, loading: authLoading, anyConnected, login, logout, refresh: refreshAuth } = useAuth();
   const { holdings, summary, loading: portfolioLoading, error: portfolioError, fetchHoldings } = usePortfolio();
   const { selling, result, error: sellError, executeSell, reset: resetSell } = usePanicSell();
@@ -135,7 +160,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen flex flex-col noise-bg relative">
-      <Header brokers={brokers} loading={authLoading} marketStatus={marketStatus} onLogin={login} onLogout={logout} />
+      <Header brokers={brokers} loading={authLoading} marketStatus={marketStatus} onLogin={login} onLogout={logout} onAppLogout={onAppLogout} />
 
       <main className="relative flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 z-10">
         {!anyConnected ? (

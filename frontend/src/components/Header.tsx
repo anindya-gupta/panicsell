@@ -6,9 +6,10 @@ interface HeaderProps {
   marketStatus: MarketStatus | null;
   onLogin: (broker: string) => void;
   onLogout: (broker: string) => void;
+  onAppLogout: () => void;
 }
 
-export default function Header({ brokers, loading, marketStatus, onLogin, onLogout }: HeaderProps) {
+export default function Header({ brokers, loading, marketStatus, onLogin, onLogout, onAppLogout }: HeaderProps) {
   return (
     <header className="glass-strong sticky top-0 z-50 border-b border-white/[0.04]">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
@@ -61,6 +62,15 @@ export default function Header({ brokers, loading, marketStatus, onLogin, onLogo
               )
             )
           )}
+
+          <div className="w-px h-6 bg-white/[0.06] mx-1" />
+
+          <button
+            onClick={onAppLogout}
+            className="text-xs font-medium px-3 py-1.5 rounded-lg text-gray-500 hover:text-accent-red hover:bg-accent-red/10 border border-transparent hover:border-accent-red/20 transition-all duration-200"
+          >
+            Sign Out
+          </button>
         </div>
       </div>
     </header>
