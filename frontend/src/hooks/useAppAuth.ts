@@ -23,7 +23,8 @@ export function useAppAuth() {
         setIsAuthenticated(true);
       }
     } catch {
-      setIsAuthenticated(true);
+      setIsAuthenticated(false);
+      clearToken();
     }
     setChecking(false);
   }, []);
