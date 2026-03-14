@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+kiteconnect
+pydantic-settings
+python-dotenv
+httpx
+growwapi
+pyotp
