@@ -24,7 +24,7 @@ export async function apiFetch(
   const res = await fetch(input, { ...init, headers });
   if (res.status === 401 && token) {
     clearToken();
-    window.location.reload();
+    window.location.href = "/login";
   }
   return res;
 }

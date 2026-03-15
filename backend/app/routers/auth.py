@@ -48,7 +48,7 @@ def login(broker_name: str):
             broker.generate_session()
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to connect to {broker.display_name}: {e}")
-        return RedirectResponse(url=f"{settings.frontend_url}/?connected={broker_name}")
+        return RedirectResponse(url=f"{settings.frontend_url}/dashboard?connected={broker_name}")
 
     logger.info(f"Redirecting to {broker.display_name} login. Callback should hit: {settings.backend_url}/api/auth/callback")
     return RedirectResponse(url=login_url)
@@ -92,7 +92,7 @@ def _handle_callback(broker_name: str, request_token: str | None, status: str | 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to create session: {e}")
 
-    return RedirectResponse(url=f"{settings.frontend_url}/?connected={broker_name}")
+    return RedirectResponse(url=f"{settings.frontend_url}/dashboard?connected={broker_name}")
 
 
 @router.get("/status")

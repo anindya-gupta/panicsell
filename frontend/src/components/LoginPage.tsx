@@ -1,10 +1,12 @@
 import { useState, type FormEvent } from "react";
+import { useNavigate } from "react-router-dom";
 
 interface Props {
   onLogin: (username: string, password: string) => Promise<string | null>;
 }
 
 export default function LoginPage({ onLogin }: Props) {
+  const navigate = useNavigate();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -15,7 +17,11 @@ export default function LoginPage({ onLogin }: Props) {
     setError("");
     setLoading(true);
     const err = await onLogin(username, password);
-    if (err) setError(err);
+    if (err) {
+      setError(err);
+    } else {
+      navigate("/dashboard", { replace: true });
+    }
     setLoading(false);
   };
 

@@ -1,3 +1,4 @@
+import { Link, useLocation } from "react-router-dom";
 import type { BrokerStatus, MarketStatus } from "../types";
 
 interface HeaderProps {
@@ -9,20 +10,47 @@ interface HeaderProps {
   onAppLogout: () => void;
 }
 
+const NAV_ITEMS = [
+  { path: "/dashboard", label: "Dashboard" },
+  { path: "/orders", label: "Orders" },
+  { path: "/alerts", label: "Alerts" },
+];
+
 export default function Header({ brokers, loading, marketStatus, onLogin, onLogout, onAppLogout }: HeaderProps) {
+  const { pathname } = useLocation();
+
   return (
     <header className="glass-strong sticky top-0 z-50 border-b border-white/[0.04]">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <div className="relative group">
-            <div className="absolute -inset-1 bg-gradient-to-r from-accent-red to-accent-orange rounded-xl opacity-40 group-hover:opacity-70 blur transition-opacity duration-300" />
-            <div className="relative w-9 h-9 bg-surface-1 rounded-xl flex items-center justify-center border border-white/10">
-              <span className="font-mono text-sm font-extrabold gradient-text">PS</span>
+          <Link to="/dashboard" className="flex items-center gap-3">
+            <div className="relative group">
+              <div className="absolute -inset-1 bg-gradient-to-r from-accent-red to-accent-orange rounded-xl opacity-40 group-hover:opacity-70 blur transition-opacity duration-300" />
+              <div className="relative w-9 h-9 bg-surface-1 rounded-xl flex items-center justify-center border border-white/10">
+                <span className="font-mono text-sm font-extrabold gradient-text">PS</span>
+              </div>
             </div>
-          </div>
-          <h1 className="text-lg font-bold tracking-tight">
-            PANIC<span className="gradient-text">SELL</span>
-          </h1>
+            <h1 className="text-lg font-bold tracking-tight">
+              PANIC<span className="gradient-text">SELL</span>
+            </h1>
+          </Link>
+
+          <nav className="hidden sm:flex items-center gap-1 ml-4">
+            {NAV_ITEMS.map((item) => (
+              <Link
+                key={item.path}
+                to={item.path}
+                className={`text-xs font-medium px-3 py-1.5 rounded-lg transition-all duration-200 ${
+                  pathname === item.path
+                    ? "bg-white/[0.08] text-white"
+                    : "text-gray-500 hover:text-gray-300 hover:bg-white/[0.04]"
+                }`}
+              >
+                {item.label}
+              </Link>
+            ))}
+          </nav>
+
           {marketStatus && <MarketBadge status={marketStatus} />}
         </div>
 
