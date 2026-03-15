@@ -1,6 +1,6 @@
 # PanicSell -- Technical Architecture Document
 
-**Version**: 2.0.0
+**Version**: 2.1.0
 **Date**: March 2026
 **Author**: Anindya G.
 
@@ -43,7 +43,7 @@ During market panic events, manually selling stocks across multiple broker apps 
 
 | Layer | Technology |
 |-------|------------|
-| Frontend | React 18, TypeScript, Vite 6, Tailwind CSS 3 |
+| Frontend | React 18, TypeScript, Vite 6, Tailwind CSS 3, React Router 6 |
 | Backend | Python 3.12, FastAPI, Uvicorn |
 | Broker SDKs | `kiteconnect` (Zerodha), `growwapi` (Groww), `pyotp` (TOTP) |
 | Email | Gmail SMTP via `smtplib` (SSL, port 465) |
@@ -57,15 +57,7 @@ During market panic events, manually selling stocks across multiple broker apps 
 
 ### High-Level Topology
 
-```mermaid
-graph LR
-    Browser["User Browser"] -->|"HTTPS"| Vercel["Vercel CDN<br/>(React SPA)"]
-    Vercel -->|"/api/* rewrite"| Render["Render<br/>(FastAPI + Docker)"]
-    Render -->|"OAuth redirect + API"| Zerodha["Zerodha<br/>Kite Connect API"]
-    Render -->|"TOTP + API"| Groww["Groww<br/>Trading API"]
-    Render -->|"SMTP SSL"| Gmail["Gmail<br/>SMTP Server"]
-    Zerodha -->|"OAuth callback"| Render
-```
+![High-Level Topology](diagrams/topology.png)
 
 ### Separation of Concerns
 
@@ -92,7 +84,7 @@ The frontend never communicates directly with broker APIs. All broker interactio
 | Root Directory | `frontend/` |
 | URL | `https://panicsell-nine.vercel.app` |
 
-**API Proxy** -- configured in `frontend/vercel.json`:
+**API Proxy + SPA Fallback** -- configured in `frontend/vercel.json`:
 
 ```json
 {
@@ -100,12 +92,17 @@ The frontend never communicates directly with broker APIs. All broker interactio
     {
       "source": "/api/:path*",
       "destination": "https://panicsell-backend.onrender.com/api/:path*"
+    },
+    {
+      "source": "/((?!assets/).*)",
+      "destination": "/index.html"
     }
   ]
 }
 ```
 
-All requests matching `/api/*` are rewritten to the Render backend at the edge. The browser sees same-origin requests, avoiding CORS issues on the client side.
+- **API rewrite**: All requests matching `/api/*` are proxied to the Render backend at the edge. The browser sees same-origin requests, avoiding CORS issues.
+- **SPA fallback**: All non-asset requests fall through to `index.html`, enabling client-side routing. Without this, direct navigation to `/dashboard`, `/orders`, or `/alerts` would return a 404 from Vercel.
 
 ### Backend -- Render
 
@@ -144,6 +141,8 @@ The `gcc` package is required for compiling C extensions in `kiteconnect` and `g
 | `GROWW_TOTP_SECRET` | Groww TOTP secret for code generation | Recommended |
 | `GROWW_API_KEY` | Groww API key (fallback auth) | Optional |
 | `GROWW_API_SECRET` | Groww API secret (fallback auth) | Optional |
+| `ADMIN_USERNAME` | Username for app-level login | Yes |
+| `ADMIN_PASSWORD` | Password for app-level login | Yes |
 | `FRONTEND_URL` | Vercel frontend origin for CORS | Yes |
 | `BACKEND_URL` | Render backend URL for callback construction | Yes |
 | `SMTP_EMAIL` | Gmail address for alert emails | Optional |
@@ -153,13 +152,7 @@ No secrets are stored in code or committed to version control. The `.env` file i
 
 ### Auto-Deploy Pipeline
 
-```mermaid
-graph LR
-    Push["git push to GitHub"] --> Vercel_Build["Vercel: npm run build"]
-    Push --> Render_Build["Render: docker build"]
-    Vercel_Build --> Vercel_Deploy["Vercel CDN"]
-    Render_Build --> Render_Deploy["Render Container"]
-```
+![Auto-Deploy Pipeline](diagrams/deploy-pipeline.png)
 
 Both Vercel and Render are connected to the same GitHub repository and trigger automatic deployments on every push to the main branch.
 
@@ -173,17 +166,18 @@ Both Vercel and Render are connected to the same GitHub repository and trigger a
 backend/
   app/
     __init__.py
-    main.py              # FastAPI app, middleware, lifespan
+    main.py              # FastAPI app, auth middleware, lifespan
     config.py            # Pydantic settings, env loading
     routers/
       __init__.py
-      auth.py            # Login, callback, status, logout
+      auth.py            # App login, broker login/callback, status, logout
       portfolio.py       # Holdings, margins, quotes
       orders.py          # Panic sell, order history
       market.py          # NSE market status
       alerts.py          # Alert config, baseline management
     services/
       __init__.py
+      auth_service.py    # App-level token create/validate/revoke
       broker_base.py     # Abstract broker interface
       zerodha_broker.py  # Zerodha/Kite implementation
       groww_broker.py    # Groww implementation
@@ -198,35 +192,7 @@ backend/
 
 ### Module Dependency Graph
 
-```mermaid
-graph TD
-    main["main.py<br/>(FastAPI App)"] --> auth["routers/auth.py"]
-    main --> portfolio["routers/portfolio.py"]
-    main --> orders["routers/orders.py"]
-    main --> market["routers/market.py"]
-    main --> alerts_r["routers/alerts.py"]
-    main --> alert_mon["services/alert_monitor.py"]
-    main --> config["config.py"]
-
-    auth --> broker_mgr["services/broker_manager.py"]
-    portfolio --> broker_mgr
-    orders --> broker_mgr
-    alerts_r --> broker_mgr
-    alerts_r --> alert_mon
-    alert_mon --> broker_mgr
-    alert_mon --> email_svc["services/email_service.py"]
-
-    broker_mgr --> zerodha["services/zerodha_broker.py"]
-    broker_mgr --> groww["services/groww_broker.py"]
-    broker_mgr --> base["services/broker_base.py"]
-    zerodha --> base
-    groww --> base
-    zerodha --> config
-    groww --> config
-    email_svc --> config
-    broker_mgr --> config
-    auth --> config
-```
+![Module Dependency Graph](diagrams/module-deps.png)
 
 ### Application Lifecycle
 
@@ -262,17 +228,19 @@ In production, `allowed_origins` contains the Vercel domain. Localhost is additi
 
 ## 5. API Reference
 
-All endpoints are prefixed with `/api`. The backend exposes 5 router groups with 14 total endpoints.
+All endpoints are prefixed with `/api`. The backend exposes 5 router groups with 16 total endpoints. All endpoints except those explicitly marked require a valid app-level `Bearer` token in the `Authorization` header.
 
 ### Auth (`/api/auth`)
 
-| Method | Path | Description | Auth Required |
-|--------|------|-------------|---------------|
-| GET | `/login/{broker_name}` | Initiates broker login. For Zerodha: redirects to Kite OAuth. For Groww: generates session server-side via TOTP and redirects to frontend. | No |
-| GET | `/callback/{broker_name}` | OAuth callback. Receives `request_token` and `status` query params, exchanges for access token, redirects to frontend. | No |
-| GET | `/callback` | Fallback callback (assumes Zerodha). Handles legacy redirect URLs without broker name. | No |
-| GET | `/status` | Returns connection status of all configured brokers, including profile info for connected ones. | No |
-| POST | `/logout/{broker_name}` | Disconnects a specific broker. Invalidates Zerodha token server-side; clears Groww session in memory. | No |
+| Method | Path | Description | App Token Required |
+|--------|------|-------------|-----|
+| POST | `/app-login` | Authenticates with admin username/password, returns a session token. | No |
+| POST | `/app-logout` | Revokes the current app session token. | Yes |
+| GET | `/login/{broker_name}` | Initiates broker login. For Zerodha: redirects to Kite OAuth. For Groww: generates session server-side via TOTP and redirects to frontend. | No (browser redirect) |
+| GET | `/callback/{broker_name}` | OAuth callback. Receives `request_token` and `status` query params, exchanges for access token, redirects to frontend `/dashboard`. | No (broker callback) |
+| GET | `/callback` | Fallback callback (assumes Zerodha). Handles legacy redirect URLs without broker name. | No (broker callback) |
+| GET | `/status` | Returns connection status of all configured brokers, including profile info for connected ones. | Yes |
+| POST | `/logout/{broker_name}` | Disconnects a specific broker. Invalidates Zerodha token server-side; clears Groww session in memory. | Yes |
 
 ### Portfolio (`/api/portfolio`)
 
@@ -358,47 +326,51 @@ All endpoints are prefixed with `/api`. The backend exposes 5 router groups with
 
 ## 6. Authentication and Session Management
 
+### Application-Level Authentication
+
+PanicSell uses a two-layer authentication model:
+
+1. **App-level auth**: Username/password login to access the PanicSell application itself
+2. **Broker-level auth**: OAuth or TOTP-based login to connect individual broker accounts
+
+#### App Auth Flow
+
+The app auth gate prevents unauthorized access to the deployed application. It uses a single admin account defined via environment variables.
+
+**Backend (`auth_service.py`):**
+- Credentials are validated against `ADMIN_USERNAME` and `ADMIN_PASSWORD` from environment variables
+- On successful login, a `secrets.token_hex(32)` (64-character random hex string) is generated and stored in an in-memory `set`
+- Token validation is an O(1) set membership check
+- Token revocation removes the token from the set via `discard()`
+- If `ADMIN_PASSWORD` is empty, the auth middleware is bypassed entirely (development mode)
+
+**Middleware (`main.py`):**
+- An HTTP middleware intercepts all `/api/*` requests before they reach routers
+- Exempt paths: `/api/health`, `/api/auth/app-login`, `/api/auth/callback`, `/api/auth/callback/*`, `/api/auth/login/*`
+- All other API requests require a valid `Authorization: Bearer <token>` header
+- Invalid or missing tokens receive a `401 Unauthorized` response
+
+**Frontend (`apiFetch.ts` + `AuthContext.tsx`):**
+- Token is stored in `sessionStorage` (browser tab-scoped, never sent in URLs)
+- `apiFetch()` utility automatically injects the `Authorization: Bearer` header into all API requests
+- On 401 response, the token is cleared and the user is redirected to `/login`
+- `AuthContext` provides `isAuthenticated`, `login`, and `logout` to all components via React Context
+- `ProtectedRoute` component redirects unauthenticated users to `/login`
+
+**Security properties:**
+- Token lives only in `sessionStorage` -- closing the tab destroys it; sharing the URL does not share the session
+- In-memory token storage means all sessions are invalidated on backend restart
+- No cookies are used, eliminating CSRF attack surface
+
 ### Zerodha -- OAuth 2.0 Flow
 
-```mermaid
-sequenceDiagram
-    participant Browser
-    participant Vercel as Vercel (Frontend)
-    participant Render as Render (Backend)
-    participant Kite as Zerodha Kite
-
-    Browser->>Vercel: Click "Connect Zerodha"
-    Vercel->>Render: GET /api/auth/login/zerodha
-    Render->>Browser: 302 Redirect to kite.zerodha.com/connect/login
-    Browser->>Kite: User enters credentials + TOTP
-    Kite->>Render: GET /api/auth/callback?request_token=xxx&status=success
-    Render->>Render: KiteConnect.generate_session(request_token, api_secret)
-    Note over Render: Access token stored in ZerodhaBroker._access_token
-    Render->>Browser: 302 Redirect to FRONTEND_URL/?connected=zerodha
-    Browser->>Vercel: Load dashboard
-    Vercel->>Render: GET /api/auth/status
-    Render->>Vercel: { brokers: [{ broker: "zerodha", connected: true, user_name: "..." }] }
-```
+![Zerodha OAuth Flow](diagrams/zerodha-oauth.png)
 
 The Zerodha redirect URL on their developer console must point to `BACKEND_URL/api/auth/callback` (the fallback route that assumes Zerodha).
 
 ### Groww -- TOTP Flow (Recommended)
 
-```mermaid
-sequenceDiagram
-    participant Browser
-    participant Vercel as Vercel (Frontend)
-    participant Render as Render (Backend)
-    participant GrowwAPI as Groww API
-
-    Browser->>Vercel: Click "Connect Groww"
-    Vercel->>Render: GET /api/auth/login/groww
-    Render->>Render: pyotp.TOTP(GROWW_TOTP_SECRET).now()
-    Render->>GrowwAPI: GrowwAPI.get_access_token(api_key=TOTP_TOKEN, totp=code)
-    GrowwAPI->>Render: access_token
-    Note over Render: Access token stored in GrowwBroker._access_token
-    Render->>Browser: 302 Redirect to FRONTEND_URL/?connected=groww
-```
+![Groww TOTP Flow](diagrams/groww-totp.png)
 
 No browser interaction with Groww is required. The TOTP code is generated server-side using the `pyotp` library, making the connection fully automatic with no daily manual approval.
 
@@ -414,16 +386,19 @@ This flow works identically from the user's perspective, but requires daily manu
 
 ### Session Storage
 
-Sessions are stored **entirely in memory** on the backend process:
+All sessions are stored **entirely in memory** on the backend process:
 
-| Broker | Token Location | Persistence |
-|--------|----------------|-------------|
+| Session Type | Token Location | Persistence |
+|--------------|----------------|-------------|
+| App login | `auth_service._active_tokens` (set) | Lost on process restart |
 | Zerodha | `ZerodhaBroker._access_token` + `KiteConnect._access_token` | Lost on process restart |
 | Groww | `GrowwBroker._access_token` + `GrowwAPI` instance | Lost on process restart |
 
-There is no database, no Redis, and no cookie/JWT mechanism. The `BrokerManager` is instantiated as a module-level singleton (`broker_manager = BrokerManager()`) and lives for the lifetime of the process.
+There is no database, no Redis, and no cookie/JWT mechanism. The `BrokerManager` is instantiated as a module-level singleton (`broker_manager = BrokerManager()`) and lives for the lifetime of the process. App tokens are stored in a module-level `set` in `auth_service.py`.
 
-**Token expiry**: Both Zerodha and Groww tokens expire daily (around 6-8 AM IST). Users must reconnect each morning.
+**Token expiry**:
+- **App tokens**: No expiry; valid until backend restart or explicit logout
+- **Broker tokens**: Both Zerodha and Groww tokens expire daily (around 6-8 AM IST). Users must reconnect each morning.
 
 ### Logout
 
@@ -470,17 +445,7 @@ There is no database, no Redis, and no cookie/JWT mechanism. The `BrokerManager`
 
 `broker_manager.py` is the central orchestration layer:
 
-```mermaid
-graph TD
-    BM["BrokerManager"] --> ZB["ZerodhaBroker"]
-    BM --> GB["GrowwBroker"]
-    BM --> StatusAgg["get_status() -- aggregate connection status"]
-    BM --> HoldingsAgg["get_all_holdings() -- merge holdings"]
-    BM --> MarginsAgg["get_all_margins() -- merge margins"]
-    BM --> OrdersAgg["get_all_orders() -- merge orders"]
-    BM --> SellOrch["sell_holdings() -- multi-broker sell orchestration"]
-    BM --> QuotesAgg["get_all_quotes() -- merge quotes"]
-```
+![BrokerManager](diagrams/broker-manager.png)
 
 **Multi-broker sell orchestration** (`sell_holdings`):
 1. Determine target brokers (specific or all connected)
@@ -509,6 +474,7 @@ PanicSell uses **no database**. All data falls into three categories:
 
 | Data Type | Storage | Lifetime | Location |
 |-----------|---------|----------|----------|
+| App session tokens | In-memory Python `set` | Until process restart or logout | `auth_service._active_tokens` |
 | Broker access tokens | In-memory (Python objects) | Until process restart | `ZerodhaBroker._access_token`, `GrowwBroker._access_token` |
 | Alert configuration | JSON file on disk | Persistent across restarts | `backend/alerts_config.json` |
 | Holdings, orders, margins, quotes | None (fetched in real-time) | Per-request | Broker APIs |
@@ -556,23 +522,7 @@ Both broker SDKs return data in different formats. The broker implementations no
 
 ### Real-Time Data Flow
 
-```mermaid
-sequenceDiagram
-    participant Frontend
-    participant Backend
-    participant Zerodha as Zerodha API
-    participant Groww as Groww API
-
-    loop Every 30 seconds (when market open)
-        Frontend->>Backend: GET /api/portfolio/holdings
-        Backend->>Zerodha: kite.holdings()
-        Zerodha->>Backend: Raw holdings
-        Backend->>Groww: groww.get_holdings_for_user()
-        Groww->>Backend: Raw holdings
-        Backend->>Backend: Normalize + merge + compute summary
-        Backend->>Frontend: { holdings, summary }
-    end
-```
+![Real-Time Data Flow](diagrams/data-flow.png)
 
 ---
 
@@ -630,24 +580,7 @@ When the market closes, polling stops automatically to avoid unnecessary API cal
 
 ### Architecture
 
-```mermaid
-graph TD
-    Startup["FastAPI Lifespan Start"] -->|"start_alert_loop()"| Thread["Daemon Thread<br/>(alert-monitor)"]
-    Thread -->|"Every 60 seconds"| Check["check_alerts()"]
-    Check --> LoadCfg["Load alerts_config.json"]
-    Check --> TimeCheck{"Market hours?<br/>Mon-Fri 09:15-15:30"}
-    TimeCheck -->|No| Skip["Skip"]
-    TimeCheck -->|Yes| BrokerLoop["For each connected broker"]
-    BrokerLoop --> ThresholdCheck{"Threshold configured?<br/>Baseline exists?<br/>Cooldown expired?"}
-    ThresholdCheck -->|No| NextBroker["Next broker"]
-    ThresholdCheck -->|Yes| FetchHoldings["Fetch holdings from broker"]
-    FetchHoldings --> ComputeDrop["Compute portfolio drop %"]
-    ComputeDrop --> DropCheck{"Drop exceeds threshold?"}
-    DropCheck -->|No| NextBroker
-    DropCheck -->|Yes| SendEmail["Send alert email via Gmail SMTP"]
-    SendEmail --> UpdateCooldown["Update last_triggered timestamp"]
-    UpdateCooldown --> SaveConfig["Save config to disk"]
-```
+![Alert Architecture](diagrams/alert-architecture.png)
 
 ### Per-Broker Threshold Checking
 
@@ -683,24 +616,86 @@ The `SMTP_EMAIL` must be a Gmail address, and `SMTP_APP_PASSWORD` must be a Gmai
 
 ## 11. Frontend Architecture
 
+### Routing
+
+The frontend uses **React Router v6** with client-side routing. All routes are defined in `App.tsx`:
+
+| Route | Component | Auth Required | Description |
+|-------|-----------|---------------|-------------|
+| `/login` | `LoginPageRoute` | No | App login page; redirects to `/dashboard` if already authenticated |
+| `/dashboard` | `DashboardPage` | Yes | Main portfolio view with holdings, sell buttons, and inline order history |
+| `/orders` | `OrdersPage` | Yes | Full-page order history table |
+| `/alerts` | `AlertsPage` | Yes | Alert threshold configuration |
+| `/*` | -- | -- | Catch-all redirect to `/dashboard` |
+
+**Route protection** is handled by `ProtectedRoute`, which wraps authenticated routes and redirects to `/login` on unauthenticated access.
+
+**Shared layout**: `AppLayout` renders the persistent `Header` (with navigation tabs and broker status chips) and an `<Outlet />` for the active page. This avoids re-mounting the header on page transitions.
+
+### Directory Structure
+
+```
+frontend/src/
+  App.tsx                    # BrowserRouter + route definitions
+  main.tsx                   # React DOM entry point
+  index.css                  # Tailwind base, components, utilities
+  lib/
+    AuthContext.tsx           # React Context provider for app-level auth
+    ProtectedRoute.tsx       # Auth guard (redirects to /login)
+    apiFetch.ts              # Fetch wrapper with auto auth header injection
+  pages/
+    LoginPageRoute.tsx       # Login route (redirects if authenticated)
+    DashboardPage.tsx        # Portfolio dashboard
+    OrdersPage.tsx           # Order history (full page)
+    AlertsPage.tsx           # Alert configuration (full page)
+  components/
+    AppLayout.tsx            # Header + Outlet (shared layout for protected pages)
+    LoginPage.tsx            # Login form UI
+    Header.tsx               # Nav bar with route links + broker chips + sign out
+    HoldingsTable.tsx        # Interactive holdings table with selection
+    SellButtons.tsx          # Sell Selected, Panic Sell [Broker], MEGA PANIC SELL ALL
+    ConfirmModal.tsx         # Sell confirmation with typed challenge
+    OrderResults.tsx         # Post-sell results overlay
+    OrderHistory.tsx         # Inline order history (dashboard)
+    PortfolioSummaryBar.tsx  # Invested / Current / P&L bar
+    FundsBar.tsx             # Available funds per broker
+    BrokerTabs.tsx           # All / Zerodha / Groww filter tabs
+    BrokerBadge.tsx          # Colored broker label chip
+    AlertConfig.tsx          # Alert config (legacy modal, now replaced by AlertsPage)
+  hooks/
+    useAuth.ts               # Broker connection status
+    usePortfolio.ts          # Holdings + summary data
+    usePanicSell.ts          # Sell execution
+    useMarketStatus.ts       # Market open/closed polling
+    usePolling.ts            # Auto-refresh (30s when market open)
+    useAppAuth.ts            # (Legacy) app auth -- replaced by AuthContext
+  types/
+    index.ts                 # TypeScript interfaces
+```
+
 ### Component Hierarchy
 
-```mermaid
-graph TD
-    App["App"] --> Header
-    App --> Welcome["Welcome Screen<br/>(when no brokers connected)"]
-    App --> Dashboard["Dashboard<br/>(when any broker connected)"]
-    Dashboard --> BrokerTabs
-    Dashboard --> FundsBar
-    Dashboard --> PortfolioSummaryBar
-    Dashboard --> HoldingsTable
-    Dashboard --> SellButtons
-    Dashboard --> OrderHistory
-    Dashboard --> ConfirmModal
-    Dashboard --> OrderResults
-    Dashboard --> AlertConfig
-    HoldingsTable --> BrokerBadge
-    Header --> MarketBadge["Market Status Badge"]
+![Component Hierarchy](diagrams/component-hierarchy.png)
+
+```
+BrowserRouter
+  └── AuthProvider (Context)
+        ├── /login → LoginPageRoute → LoginPage
+        └── ProtectedRoute (auth guard)
+              └── AppLayout
+                    ├── Header (nav + broker chips + sign out)
+                    └── Outlet
+                          ├── /dashboard → DashboardPage
+                          │     ├── BrokerTabs
+                          │     ├── FundsBar
+                          │     ├── PortfolioSummaryBar
+                          │     ├── HoldingsTable
+                          │     ├── SellButtons
+                          │     ├── OrderHistory (inline)
+                          │     ├── ConfirmModal (overlay)
+                          │     └── OrderResults (overlay)
+                          ├── /orders → OrdersPage
+                          └── /alerts → AlertsPage
 ```
 
 ### Custom Hooks
@@ -715,28 +710,36 @@ graph TD
 
 ### State Management
 
-The application uses **React local state and hooks only** -- no Redux, Zustand, or other external state libraries.
+The application uses **React Context + local state and hooks** -- no Redux, Zustand, or other external state libraries.
 
 | State | Location | Scope |
 |-------|----------|-------|
-| Broker statuses | `useAuth` → `App` | Global |
-| Holdings + summary | `usePortfolio` → `App` | Global |
-| Selected holdings | `useState` in `App` | Dashboard |
-| Broker filter tab | `useState` in `App` | Dashboard |
-| Sell results | `usePanicSell` → `App` | Dashboard |
-| Market status | `useMarketStatus` → `App` | Global |
-| Modal state | `useState` in `App` | Dashboard |
+| App authentication | `AuthContext` (React Context) | Global (all routes) |
+| Broker statuses | `useAuth` → `AppLayout` + `DashboardPage` | Shared layout + dashboard |
+| Market status | `useMarketStatus` → `AppLayout` + `DashboardPage` | Shared layout + dashboard |
+| Holdings + summary | `usePortfolio` → `DashboardPage` | Dashboard only |
+| Selected holdings | `useState` in `DashboardPage` | Dashboard only |
+| Broker filter tab | `useState` in `DashboardPage` | Dashboard only |
+| Sell results | `usePanicSell` → `DashboardPage` | Dashboard only |
+| Confirm modal | `useState` in `DashboardPage` | Dashboard only |
 
 Filtered views (per-broker holdings, per-broker summary) are computed via `useMemo` based on the active broker filter tab.
 
 ### API Communication
 
-All API calls use the browser's native `fetch` API with relative `/api/` paths:
+All API calls use `apiFetch()`, a wrapper around the browser's native `fetch` that auto-injects the `Authorization: Bearer` header from `sessionStorage`:
 
 ```typescript
-const res = await fetch("/api/portfolio/holdings");
+import { apiFetch } from "../lib/apiFetch";
+
+const res = await apiFetch("/api/portfolio/holdings");
 const data: HoldingsResponse = await res.json();
 ```
+
+**Key behaviors:**
+- Reads the app token from `sessionStorage` and sets the `Authorization` header automatically
+- On 401 response (expired/invalid token), clears `sessionStorage` and redirects to `/login`
+- Login and token verification calls use raw `fetch` directly to avoid circular dependency
 
 - **Development**: Vite dev server proxies `/api/*` to `http://localhost:8000`
 - **Production**: Vercel rewrites `/api/*` to the Render backend at the edge
@@ -771,10 +774,12 @@ The backend restricts cross-origin requests to the configured `FRONTEND_URL`. In
 
 | Secret | Storage | Access |
 |--------|---------|--------|
+| Admin credentials | Render env vars (`ADMIN_USERNAME`, `ADMIN_PASSWORD`) | Server-side only |
 | Broker API keys/secrets | Render env vars | Server-side only |
 | TOTP secrets | Render env vars | Server-side only |
 | SMTP credentials | Render env vars | Server-side only |
-| Broker access tokens | In-memory (Python) | Never sent to frontend |
+| App session tokens | In-memory Python `set` | Server validates; frontend stores in `sessionStorage` |
+| Broker access tokens | In-memory (Python objects) | Never sent to frontend |
 
 - `.env` is excluded from git (`.gitignore`) and Docker builds (`.dockerignore`)
 - No secrets are embedded in frontend code
@@ -782,9 +787,18 @@ The backend restricts cross-origin requests to the configured `FRONTEND_URL`. In
 
 ### Session Security
 
-- **No JWT, no cookies**: Sessions are server-side only, stored as Python object attributes. There is no session token sent to the client.
-- **No session hijacking surface**: Since no session identifier is transmitted, there is nothing for an attacker to steal from the client side.
-- **Trade-off**: The backend must be a single process (no horizontal scaling), and sessions are lost on restart.
+**App-level session:**
+- Token is a 64-character random hex string (`secrets.token_hex(32)`) stored in the backend's in-memory `set`
+- Frontend stores the token in `sessionStorage` (tab-scoped; not shared across tabs, not persisted on browser close)
+- No cookies are used, eliminating CSRF attack surface
+- Sharing the URL does not share the session -- the token is never in the URL
+- All sessions are invalidated on backend restart (Render redeploy)
+
+**Broker-level session:**
+- Broker access tokens are stored as Python object attributes, never sent to the frontend
+- The frontend receives only `connected: true/false` and profile display info (user name/ID)
+
+**Trade-off**: The backend must be a single process (no horizontal scaling), and all sessions (app + broker) are lost on restart.
 
 ### Input Validation
 
@@ -820,6 +834,7 @@ PanicSell is designed as a personal trading tool that complies with SEBI 2025 re
 | No buy orders | Sell-only tool | By design -- scope limited to liquidation |
 | Groww day change data | Limited to 0 (API doesn't expose intraday change) | Would require additional quote API integration |
 | No LLM integration | No AI-powered features | N/A for current scope |
+| Single admin account | Only one user can log in | Sufficient for personal use; multi-user requires database migration |
 
 ### Future Improvements
 
@@ -836,4 +851,4 @@ PanicSell is designed as a personal trading tool that complies with SEBI 2025 re
 
 ---
 
-*This document reflects the PanicSell architecture as deployed in March 2026. For the latest code, see the [GitHub repository](https://github.com/anindya1046-5887/panicsell).*
+*This document reflects the PanicSell v2.1 architecture as deployed in March 2026. For the latest code, see the [GitHub repository](https://github.com/anindya-gupta/panicsell).*
