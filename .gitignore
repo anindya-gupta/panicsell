@@ -22,3 +22,7 @@ frontend/dist/
 
 # Cursor
 .cursor/
+
+# Build / tool output
+mdpdf.log
+frontend/tsconfig.tsbuildinfo

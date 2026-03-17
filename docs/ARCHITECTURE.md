@@ -661,14 +661,12 @@ frontend/src/
     FundsBar.tsx             # Available funds per broker
     BrokerTabs.tsx           # All / Zerodha / Groww filter tabs
     BrokerBadge.tsx          # Colored broker label chip
-    AlertConfig.tsx          # Alert config (legacy modal, now replaced by AlertsPage)
   hooks/
     useAuth.ts               # Broker connection status
     usePortfolio.ts          # Holdings + summary data
     usePanicSell.ts          # Sell execution
     useMarketStatus.ts       # Market open/closed polling
     usePolling.ts            # Auto-refresh (30s when market open)
-    useAppAuth.ts            # (Legacy) app auth -- replaced by AuthContext
   types/
     index.ts                 # TypeScript interfaces
 ```
